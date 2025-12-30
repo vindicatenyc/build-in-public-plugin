@@ -3,10 +3,12 @@
   "description": "Track Claude Code sessions and generate 'building in public' social media posts for Twitter/X, BlueSky, Instagram, LinkedIn, and more",
   "version": "1.0.0",
   "author": {
-    "name": "Your Name",
-    "email": "your.email@example.com"
+    "name": "Vindicate NYC",
+    "email": "vindicatenyc@gmail.com",
+    "url": "https://vindicate.nyc",
+    "X": "https://x.com/vindicatenyc"
   },
-  "repository": "https://github.com/yourusername/build-in-public-plugin",
+  "repository": "https://github.com/vindicatenyc/build-in-public-plugin",
   "license": "MIT",
   "keywords": [
     "social-media",
