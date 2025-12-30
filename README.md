@@ -21,7 +21,7 @@ This plugin automatically tracks your coding sessions and generates ready-to-pos
 
 ```bash
 # In Claude Code, run:
-/plugin marketplace add https://github.com/yourusername/build-in-public-plugin
+/plugin marketplace add https://github.com/vindicatenyc/build-in-public-plugin
 
 # Then install:
 /plugin install build-in-public
@@ -31,7 +31,7 @@ This plugin automatically tracks your coding sessions and generates ready-to-pos
 
 ```bash
 # Clone the repo
-git clone https://github.com/yourusername/build-in-public-plugin.git
+git clone https://github.com/vindicatenyc/build-in-public-plugin.git
 
 # In Claude Code, add as local plugin:
 /plugin install --plugin-dir /path/to/build-in-public-plugin
@@ -51,7 +51,9 @@ This will:
 1. Parse your current session transcript
 2. Extract highlights (commits, files created, bugs fixed, etc.)
 3. Generate posts for all platforms
-4. Save to `build-in-public_[timestamp].md` and `.json`
+4. Save to `output/build-in-public_[timestamp].md` and `.json` in your project directory
+
+**Note:** Output files are created in the current project's `output/` directory, not in the plugin directory.
 
 ### Preview Session
 
@@ -65,46 +67,59 @@ Want to see what happened before generating posts?
 
 The plugin includes a `SessionEnd` hook that reminds you to generate posts when you've had a productive session.
 
+### Project Configuration
+
+**Important:** Add this to each project's `.gitignore` to avoid committing generated posts:
+
+```gitignore
+# Build in Public generated posts
+output/
+build-in-public_*.md
+build-in-public_*.json
+```
+
+The plugin creates an `output/` directory in your project directory (not the plugin directory) to keep generated files organized and separate from your code.
+
 ## Output Example
 
-### Short Post (Twitter/X, BlueSky)
+### Short Post (Twitter/X - No Hashtags)
 ```
 ✅ Just shipped: Add user authentication with JWT tokens
-
-#BuildingInPublic #Python #FastAPI
 ```
 
-### Thread (Twitter/X)
+*Note: Hashtags removed from X/Twitter posts per platform best practices*
+
+### Thread (Twitter/X - Compelling Hook)
 ```
-🧵 Today's coding session recap:
+Tweet 1/6:
+Just shipped: Add user authentication with JWT tokens
 
-#BuildingInPublic #CodingInPublic
+Thread on how it came together 👇
 
----
-
+Tweet 2/6:
 💻 Tech stack: Python, FastAPI, PostgreSQL
 
----
-
+Tweet 3/6:
 📝 New files:
   • auth.py
   • jwt_handler.py
   • user_model.py
 
----
-
+Tweet 4/6:
 📦 Commits:
   ✅ Add user authentication with JWT tokens
   ✅ Implement refresh token rotation
 
----
+Tweet 5/6:
+🧪 Tests: All passing ✅
 
-🧪 Tests: Passing ✅
+Nothing beats that green checkmark feeling.
 
----
-
-What are you building today? 👇
+Tweet 6/6:
+What are you building today?
 ```
+
+*Note: First tweet designed as a hook to drive engagement and thread views*
 
 ## Automation Integration
 
