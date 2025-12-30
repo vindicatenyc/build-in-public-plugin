@@ -9,6 +9,26 @@ A Claude Code plugin that automatically generates social media posts from coding
 **Purpose:** Parse coding session transcripts and generate ready-to-post content for Twitter/X, BlueSky, LinkedIn, Instagram, and Mastodon
 **License:** MIT
 
+## Recent Updates (v1.0.0)
+
+**Session Parser Improvements:**
+- Fixed Claude Code JSONL format parsing (tool_use nested in message.content[])
+- Extract commit messages from heredoc format
+- Properly detect file operations (Write, Edit tools)
+- Track programming languages from file extensions
+
+**Platform-Specific Formatting:**
+- Removed hashtags from X/Twitter posts (per platform best practices)
+- Keep hashtags for LinkedIn, Instagram, Mastodon (good for discoverability)
+- Create compelling thread hooks that drive engagement
+- Gracefully skip threads when content is insufficient
+
+**Output Organization:**
+- Generated posts saved to `output/` directory in project folder
+- Added comprehensive .gitignore patterns
+- Updated commands to use `output/` by default
+- Keeps project root clean
+
 ## Tech Stack
 
 - **Python 3.8+** - Core scripting language
@@ -91,16 +111,32 @@ The skill in `skills/build-in-public/SKILL.md` activates when users mention:
 
 ## Installation
 
-**From Marketplace:**
+**Permanent Installation (Recommended for use across all projects):**
 ```bash
-/plugin marketplace add https://github.com/vindicatenyc/build-in-public-plugin
-/plugin install build-in-public
+/plugin install https://github.com/vindicatenyc/build-in-public-plugin
 ```
 
-**Local Development:**
+This installs the plugin globally and makes it available in all Claude Code sessions.
+
+**Local Development (For plugin development/testing):**
 ```bash
+# Clone the repository
 git clone https://github.com/vindicatenyc/build-in-public-plugin.git
-/plugin install --plugin-dir /path/to/build-in-public-plugin
+
+# Start Claude Code with the plugin loaded
+claude --plugin-dir /path/to/build-in-public-plugin
+```
+
+Note: The `--plugin-dir` flag loads the plugin for that session only. For permanent installation, use the GitHub URL method above.
+
+**Output Location:**
+Generated posts are saved to `output/` in your **project directory** (not the plugin directory). Add this to each project's `.gitignore`:
+
+```gitignore
+# Build in Public generated posts
+output/
+build-in-public_*.md
+build-in-public_*.json
 ```
 
 ## Development Commands
