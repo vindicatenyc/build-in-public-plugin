@@ -1,0 +1,19 @@
+{
+  "name": "build-in-public",
+  "description": "Track Claude Code sessions and generate 'building in public' social media posts for Twitter/X, BlueSky, Instagram, LinkedIn, and more",
+  "version": "1.0.0",
+  "author": {
+    "name": "Your Name",
+    "email": "your.email@example.com"
+  },
+  "repository": "https://github.com/yourusername/build-in-public-plugin",
+  "license": "MIT",
+  "keywords": [
+    "social-media",
+    "twitter",
+    "bluesky",
+    "building-in-public",
+    "devrel",
+    "content-creation"
+  ]
+}
