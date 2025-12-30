@@ -6,7 +6,7 @@ Parses Claude Code session transcripts and generates ready-to-post
 social media content for Twitter/X, BlueSky, Instagram, LinkedIn, etc.
 
 Usage:
-    python generate_posts.py [--session SESSION_ID] [--output OUTPUT_DIR]
+    python generate_posts.py [SESSION_ID_OR_PATH] [--session SESSION_ID_OR_PATH] [--output OUTPUT_DIR]
     
 If no session is specified, uses the most recently modified session.
 """
@@ -18,7 +18,7 @@ import re
 import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List, Dict, Any, Set
 from dataclasses import dataclass, field
 
 
@@ -48,6 +48,55 @@ class SessionSummary:
     languages_used: set = field(default_factory=set)
 
 
+def safe_display_path(raw_path: str) -> str:
+    """
+    Privacy-safe display value for a path.
+
+    Claude transcripts often contain absolute paths (e.g. /Users/<name>/...).
+    For content meant to be shared publicly, we only keep the basename.
+    """
+    if not raw_path:
+        return ""
+
+    s = str(raw_path).strip().strip('"').strip("'")
+    s = s.rstrip("/\\")
+    s = s.replace("\\", "/")
+
+    base = s.split("/")[-1] if s else ""
+    return base or s
+
+
+def safe_project_name(raw_project_dir: str, *, fallback: Optional[str] = None) -> str:
+    """
+    Return a privacy-safe project name.
+
+    Claude's project directory names can encode absolute paths (e.g. Users-jane-dev-my-app),
+    which would leak personal path information if used directly. Prefer a safe fallback
+    (usually the current working directory name) when available.
+    """
+    raw = (raw_project_dir or "").strip()
+    fb = (fallback or "").strip()
+
+    if fb:
+        # If we're running inside the project directory, this is the most accurate + safe.
+        return fb
+
+    if not raw:
+        return ""
+
+    # Heuristic: if this looks like an encoded path slug, take only a short tail segment
+    # to avoid leaking username/home directory structure.
+    tokens = [t for t in raw.split("-") if t]
+    if len(tokens) >= 4:
+        tail = tokens[-4:]
+        generic_prefixes = {"dev", "code", "projects", "project", "repos", "repo", "work", "workspace", "src"}
+        while tail and tail[0].lower() in generic_prefixes:
+            tail = tail[1:]
+        return "-".join(tail) or raw
+
+    return raw
+
+
 def find_claude_projects_dir() -> Path:
     """Locate the Claude Code projects directory"""
     home = Path.home()
@@ -57,7 +106,7 @@ def find_claude_projects_dir() -> Path:
     raise FileNotFoundError(f"Claude projects directory not found at {claude_dir}")
 
 
-def get_latest_session(project_dir: Optional[Path] = None) -> tuple[Path, str]:
+def get_latest_session(project_dir: Optional[Path] = None) -> Tuple[Path, str]:
     """Find the most recently modified session JSONL file"""
     projects_dir = find_claude_projects_dir()
     
@@ -77,11 +126,11 @@ def get_latest_session(project_dir: Optional[Path] = None) -> tuple[Path, str]:
         raise FileNotFoundError("No session files found")
     
     # Extract project name from path
-    project_name = latest_file.parent.name.replace("-", "/").lstrip("/")
-    return latest_file, project_name
+    project_dir_name = latest_file.parent.name
+    return latest_file, project_dir_name
 
 
-def parse_session_jsonl(filepath: Path) -> list[dict]:
+def parse_session_jsonl(filepath: Path) -> List[Dict[str, Any]]:
     """Parse a Claude Code session JSONL file"""
     messages = []
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -95,9 +144,9 @@ def parse_session_jsonl(filepath: Path) -> list[dict]:
     return messages
 
 
-def extract_highlights(messages: list[dict]) -> SessionSummary:
+def extract_highlights(messages: List[Dict[str, Any]]) -> SessionSummary:
     """Extract notable events and statistics from session messages"""
-    highlights = []
+    highlights: List[SessionHighlight] = []
     files_created = set()
     files_modified = set()
     git_commits = []
@@ -138,14 +187,15 @@ def extract_highlights(messages: list[dict]) -> SessionSummary:
             if tool_name in ('Write', 'Edit', 'MultiEdit', 'create_file', 'str_replace'):
                 file_path = tool_input.get('file_path', tool_input.get('path', ''))
                 if file_path:
-                    ext = Path(file_path).suffix.lower()
+                    safe_path = safe_display_path(file_path)
+                    ext = Path(safe_path).suffix.lower()
                     if ext in lang_extensions:
                         languages_used.add(lang_extensions[ext])
                     
                     if tool_name in ('Write', 'create_file'):
-                        files_created.add(file_path)
+                        files_created.add(safe_path)
                     else:
-                        files_modified.add(file_path)
+                        files_modified.add(safe_path)
             
             # Bash commands
             elif tool_name == 'Bash':
@@ -166,12 +216,6 @@ def extract_highlights(messages: list[dict]) -> SessionSummary:
             content = msg.get('content', '')
             if isinstance(content, list):
                 content = ' '.join(str(c.get('text', '')) for c in content if isinstance(c, dict))
-            
-            # Look for milestone language
-            milestone_patterns = [
-                r'(completed|finished|done with|implemented|added|created|fixed|resolved|refactored)',
-                r'(feature|functionality|component|module|endpoint|api|ui|test|bug fix)'
-            ]
             
             content_lower = content.lower() if isinstance(content, str) else ''
             
@@ -232,7 +276,11 @@ def extract_highlights(messages: list[dict]) -> SessionSummary:
     )
 
 
-def generate_posts(summary: SessionSummary) -> dict:
+def generate_posts(
+    summary: SessionSummary,
+    twitter_style: str = "devlog",
+    linkedin_style: str = "professional",
+) -> dict:
     """Generate social media posts from session summary"""
     posts = {
         'short': [],      # Twitter/X, BlueSky (280 chars)
@@ -242,85 +290,300 @@ def generate_posts(summary: SessionSummary) -> dict:
         'hashtags': []
     }
     
+    twitter_style = (twitter_style or "devlog").strip().lower()
+    linkedin_style = (linkedin_style or "professional").strip().lower()
+
     # Generate hashtags
     hashtags = ['#BuildingInPublic', '#CodingInPublic']
-    for lang in list(summary.languages_used)[:3]:
+    for lang in sorted(list(summary.languages_used))[:3]:
         hashtags.append(f'#{lang.replace("/", "").replace(" ", "")}')
     if summary.tests_run:
         hashtags.append('#TDD')
     posts['hashtags'] = hashtags
     
-    hashtag_str = ' '.join(hashtags[:4])
-    
-    # Short posts (Twitter/X, BlueSky)
+    def _plural(n: int, singular: str, plural: Optional[str] = None) -> str:
+        if n == 1:
+            return singular
+        return plural or f"{singular}s"
+
+    def _time_str(minutes: int) -> str:
+        if minutes <= 0:
+            return ""
+        hours = minutes // 60
+        mins = minutes % 60
+        return f"{hours}h {mins}m" if hours else f"{mins} minutes"
+
+    # Platform-specific hashtag handling
+    # X/Twitter: No hashtags (per Elon's guidance - they look spammy)
+    # Other platforms: Include hashtags
+    hashtag_str_x = ''  # No hashtags for X/Twitter
+    hashtag_str_other = ' '.join(hashtags[:4])  # For BlueSky, LinkedIn, etc.
+
+    # Short posts (Twitter/X - NO hashtags per Elon's guidance)
     if summary.git_commits:
         commit_msg = summary.git_commits[0][:80]
-        posts['short'].append(
-            f"✅ Just shipped: {commit_msg}\n\n{hashtag_str}"
-        )
-    
+        if twitter_style == "devlog":
+            posts['short'].append(f"devlog: shipped {commit_msg}")
+        elif twitter_style == "minimal":
+            posts['short'].append(f"Shipped: {commit_msg}")
+        else:  # ship
+            posts['short'].append(f"✅ Just shipped: {commit_msg}")
+
     if summary.files_created:
         count = len(summary.files_created)
-        posts['short'].append(
-            f"🛠️ Coding session complete!\n\nCreated {count} new file{'s' if count > 1 else ''} today.\n\n{hashtag_str}"
-        )
-    
+        if twitter_style == "devlog":
+            posts['short'].append(f"devlog: added {count} {_plural(count, 'new file')}")
+        elif twitter_style == "minimal":
+            posts['short'].append(f"Created {count} {_plural(count, 'new file')}")
+        else:
+            posts['short'].append(
+                f"🛠️ Coding session complete!\n\nCreated {count} new file{'s' if count > 1 else ''} today."
+            )
+
     if summary.errors_fixed > 0:
-        posts['short'].append(
-            f"🐛➡️✅ Squashed {summary.errors_fixed} bug{'s' if summary.errors_fixed > 1 else ''} today!\n\nThe best feeling in coding.\n\n{hashtag_str}"
-        )
-    
+        n = summary.errors_fixed
+        if twitter_style == "devlog":
+            posts['short'].append(f"devlog: fixed {n} {_plural(n, 'bug')}")
+        elif twitter_style == "minimal":
+            posts['short'].append(f"Fixed {n} {_plural(n, 'bug')}")
+        else:
+            posts['short'].append(
+                f"🐛➡️✅ Squashed {n} bug{'s' if n > 1 else ''} today!\n\nThe best feeling in coding."
+            )
+
     if summary.duration_minutes > 0:
-        hours = summary.duration_minutes // 60
-        mins = summary.duration_minutes % 60
-        time_str = f"{hours}h {mins}m" if hours else f"{mins} minutes"
-        posts['short'].append(
-            f"⏱️ {time_str} of focused coding\n\n{summary.total_tool_calls} operations later... progress!\n\n{hashtag_str}"
-        )
+        t = _time_str(summary.duration_minutes)
+        if twitter_style == "devlog":
+            posts['short'].append(f"devlog: {t} in the trenches ({summary.total_tool_calls} ops)")
+        elif twitter_style == "minimal":
+            posts['short'].append(f"{t} of focused coding ({summary.total_tool_calls} ops)")
+        else:
+            posts['short'].append(
+                f"⏱️ {t} of focused coding\n\n{summary.total_tool_calls} operations later... progress!"
+            )
     
-    # Thread posts
+    # Thread posts (X/Twitter - compelling hooks, NO hashtags)
     thread = []
-    thread.append(f"🧵 Today's coding session recap:\n\n{hashtag_str}")
-    
-    if summary.languages_used:
-        langs = ', '.join(list(summary.languages_used)[:4])
-        thread.append(f"💻 Tech stack: {langs}")
-    
-    if summary.files_created:
-        file_list = '\n'.join(f"  • {Path(f).name}" for f in summary.files_created[:4])
-        thread.append(f"📝 New files:\n{file_list}")
-    
-    if summary.git_commits:
-        commits = '\n'.join(f"  ✅ {c[:60]}" for c in summary.git_commits[:3])
-        thread.append(f"📦 Commits:\n{commits}")
-    
-    if summary.tests_run:
-        thread.append("🧪 Tests: Passing ✅")
-    
-    thread.append("What are you building today? 👇")
+
+    # Only generate threads if there's actual content to share
+    has_content = (
+        summary.git_commits or
+        summary.files_created or
+        summary.errors_fixed > 0 or
+        summary.tests_run or
+        len(summary.languages_used) > 0
+    )
+
+    if has_content:
+        # Tweet 1: Compelling hook that makes people want to read more
+        hook_options = []
+
+        if summary.git_commits:
+            commit_preview = summary.git_commits[0][:100]
+            if twitter_style == "devlog":
+                hook_options.append(f"devlog: Just shipped {commit_preview}\n\nHere's what went into this 🧵")
+            else:
+                hook_options.append(f"Just shipped: {commit_preview}\n\nThread on how it came together 👇")
+
+        if summary.files_created and len(summary.files_created) >= 3:
+            count = len(summary.files_created)
+            langs = ', '.join(sorted(list(summary.languages_used))[:2]) if summary.languages_used else 'code'
+            if twitter_style == "devlog":
+                hook_options.append(f"devlog: Created {count} new files today\n\n{langs} - building in public 🧵")
+            else:
+                hook_options.append(f"Built {count} new files today in {langs}\n\nBreakdown 👇")
+
+        if summary.errors_fixed >= 2:
+            n = summary.errors_fixed
+            if twitter_style == "devlog":
+                hook_options.append(f"devlog: Squashed {n} bugs in today's session\n\nThe debugging journey 🧵")
+            else:
+                hook_options.append(f"Fixed {n} bugs today\n\nWhat I learned 👇")
+
+        # If we have a project with tech stack, use that
+        if summary.languages_used and summary.duration_minutes > 15:
+            langs = ', '.join(sorted(list(summary.languages_used))[:3])
+            time_str = _time_str(summary.duration_minutes)
+            if twitter_style == "devlog":
+                hook_options.append(f"devlog: {time_str} deep in {langs}\n\nSession recap 🧵")
+            else:
+                hook_options.append(f"{time_str} building with {langs}\n\nWhat I shipped 👇")
+
+        # Use the first available hook, or create a minimal one
+        if hook_options:
+            thread.append(hook_options[0])
+        else:
+            # Fallback for light sessions
+            project = summary.project_name or "my project"
+            if twitter_style == "devlog":
+                thread.append(f"devlog: Working on {project}\n\nProgress update 🧵")
+            else:
+                thread.append(f"Quick session on {project}\n\nWhat changed 👇")
+
+        # Tweet 2: Tech stack (if available)
+        if summary.languages_used:
+            langs = ', '.join(sorted(list(summary.languages_used))[:4])
+            thread.append(f"💻 Tech stack: {langs}")
+
+        # Tweet 3: Files created (if any)
+        if summary.files_created:
+            file_list = '\n'.join(f"  • {Path(f).name}" for f in summary.files_created[:5])
+            thread.append(f"📝 New files:\n{file_list}")
+
+        # Tweet 4: Commits (if any)
+        if summary.git_commits:
+            commits = '\n'.join(f"  ✅ {c[:60]}" for c in summary.git_commits[:3])
+            thread.append(f"📦 Commits:\n{commits}")
+
+        # Tweet 5: Tests (if run)
+        if summary.tests_run:
+            thread.append("🧪 Tests: All passing ✅\n\nNothing beats that green checkmark feeling.")
+
+        # Tweet 6: Errors fixed (if any)
+        if summary.errors_fixed > 0:
+            n = summary.errors_fixed
+            thread.append(f"🐛 Fixed {n} {_plural(n, 'bug')}\n\nDebugging is just detective work with code.")
+
+        # Final tweet: Engagement
+        thread.append("What are you building today?")
+
     posts['thread'] = thread
     
     # Medium posts (LinkedIn)
-    medium_post = f"""Coding session complete! 🚀
+    project = summary.project_name or 'my project'
+    langs = ', '.join(sorted(list(summary.languages_used))[:3])
+    time_str = _time_str(summary.duration_minutes)
+    first_commit = summary.git_commits[0][:100] if summary.git_commits else ""
 
-Today I worked on {summary.project_name or 'my project'} using {', '.join(list(summary.languages_used)[:3]) or 'code'}.
-
-Key accomplishments:
-"""
-    
-    if summary.git_commits:
-        medium_post += f"• Shipped: {summary.git_commits[0][:100]}\n"
+    bullet_lines = []
+    if first_commit:
+        bullet_lines.append(f"• Shipped: {first_commit}")
     if summary.files_created:
-        medium_post += f"• Created {len(summary.files_created)} new files\n"
+        n = len(summary.files_created)
+        bullet_lines.append(f"• Created {n} {_plural(n, 'new file')}")
     if summary.files_modified:
-        medium_post += f"• Modified {len(summary.files_modified)} existing files\n"
+        n = len(summary.files_modified)
+        bullet_lines.append(f"• Updated {n} {_plural(n, 'existing file')}")
     if summary.errors_fixed:
-        medium_post += f"• Fixed {summary.errors_fixed} bugs\n"
+        n = summary.errors_fixed
+        bullet_lines.append(f"• Fixed {n} {_plural(n, 'bug')}")
     if summary.tests_run:
-        medium_post += "• All tests passing ✅\n"
-    
-    medium_post += f"\n{' '.join(hashtags)}"
-    posts['medium'].append(medium_post)
+        bullet_lines.append("• Ran tests ✅")
+
+    bullets_block = "\n".join(bullet_lines) if bullet_lines else "• Made meaningful progress"
+    linkedin_hashtags = " ".join(hashtags[:6])
+
+    def _dedupe(strings: List[str]) -> List[str]:
+        seen = set()
+        out = []
+        for s in strings:
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
+
+    if linkedin_style == "story":
+        headline_options = [
+            "A small win (and a lesson)",
+            "A quick story from today’s build",
+            "One of those satisfying sessions",
+        ]
+        intro_options = []
+        if summary.errors_fixed:
+            intro_options.append(f"Started with a few errors in {project} and ended with a cleaner build.")
+        if summary.tests_run:
+            intro_options.append(f"Leaned on tests to keep {project} moving in the right direction.")
+        if time_str:
+            intro_options.append(f"{time_str} on {project} — the kind of steady progress that adds up.")
+        if langs:
+            intro_options.append(f"Worked through a set of improvements in {project} ({langs}).")
+        intro_options.append(f"Another step forward on {project}.")
+        intros = _dedupe(intro_options)
+
+        for i, intro in enumerate(intros[:3], 1):
+            headline = headline_options[(i - 1) % len(headline_options)]
+            medium_post = f"""{headline}
+
+{intro}
+
+What changed:
+{bullets_block}
+
+Curious what you’re building right now — what’s on your plate this week?
+
+{linkedin_hashtags}"""
+            posts['medium'].append(medium_post)
+    elif linkedin_style == "wins":
+        headline_options = [
+            "Progress, in numbers",
+            "Session snapshot",
+            "Quick status update",
+        ]
+        metrics = []
+        if time_str:
+            metrics.append(time_str)
+        if summary.files_created:
+            n = len(summary.files_created)
+            metrics.append(f"{n} {_plural(n, 'new file')}")
+        if summary.errors_fixed:
+            n = summary.errors_fixed
+            metrics.append(f"{n} {_plural(n, 'bug')} fixed")
+        if summary.tests_run:
+            metrics.append("tests run ✅")
+        metrics_line = " • ".join(metrics) if metrics else ""
+
+        intro_options = []
+        if metrics_line:
+            intro_options.append(f"{project} — {metrics_line}.")
+        if first_commit:
+            intro_options.append(f"Latest shipped change in {project}: {first_commit}.")
+        if langs:
+            intro_options.append(f"{project} + {langs} + consistent iteration.")
+        intro_options.append(f"Keeping momentum on {project}.")
+        intros = _dedupe(intro_options)
+
+        for i, intro in enumerate(intros[:3], 1):
+            headline = headline_options[(i - 1) % len(headline_options)]
+            medium_post = f"""{headline}
+
+{intro}
+
+Highlights:
+{bullets_block}
+
+{linkedin_hashtags}"""
+            posts['medium'].append(medium_post)
+    else:  # professional (default)
+        headline_options = [
+            "Build update",
+            "Progress update",
+            "Product update",
+            "Engineering update",
+        ]
+        intro_options = []
+        if first_commit:
+            intro_options.append(f"Quick update on {project}: shipped “{first_commit}”.")
+            intro_options.append(f"{project} update — shipped “{first_commit}”.")
+        if langs:
+            intro_options.append(f"Made progress on {project} using {langs}.")
+        if time_str:
+            intro_options.append(f"{time_str} of focused work on {project}.")
+        intro_options.append(f"Incremental improvements to {project} — moving it forward.")
+        intros = _dedupe(intro_options)
+
+        for i, intro in enumerate(intros[:3], 1):
+            headline = headline_options[(i - 1) % len(headline_options)]
+            medium_post = f"""{headline}
+
+{intro}
+
+Key outcomes:
+{bullets_block}
+
+What are you building this week?
+
+{linkedin_hashtags}"""
+            posts['medium'].append(medium_post)
     
     # Long form (Instagram caption / blog)
     long_post = f"""Today's build session 🛠️
@@ -335,7 +598,7 @@ The journey:
         long_post += f"{emoji} {highlight.description}\n"
     
     if summary.languages_used:
-        long_post += f"\nTech: {', '.join(summary.languages_used)}\n"
+        long_post += f"\nTech: {', '.join(sorted(summary.languages_used))}\n"
     
     long_post += f"""
 Building in public means sharing the journey - the wins, the bugs, and everything in between.
@@ -357,31 +620,40 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}
 Session: {summary.session_id}
 Project: {summary.project_name}
 Duration: {summary.duration_minutes} minutes
-Languages: {', '.join(summary.languages_used) or 'N/A'}
+Languages: {', '.join(sorted(summary.languages_used)) or 'N/A'}
 
 ---
 
-## 📱 Short Posts (Twitter/X, BlueSky - 280 chars)
+## 📱 Short Posts (Twitter/X - No hashtags)
+
+*Note: Hashtags removed per Elon's guidance - they look spammy on X*
 
 """
-    
+
     for i, post in enumerate(posts['short'], 1):
         char_count = len(post)
         output += f"### Option {i} ({char_count} chars)\n\n```\n{post}\n```\n\n"
-    
+
     output += """---
 
-## 🧵 Thread (Twitter/X)
+## 🧵 Thread (Twitter/X - No hashtags, compelling hooks)
+
+*Note: First tweet designed as a hook to drive engagement*
 
 """
-    
-    for i, tweet in enumerate(posts['thread'], 1):
-        char_count = len(tweet)
-        output += f"**{i}/{len(posts['thread'])}** ({char_count} chars)\n\n```\n{tweet}\n```\n\n"
+
+    if posts['thread']:
+        for i, tweet in enumerate(posts['thread'], 1):
+            char_count = len(tweet)
+            output += f"**{i}/{len(posts['thread'])}** ({char_count} chars)\n\n```\n{tweet}\n```\n\n"
+    else:
+        output += "*No thread generated - insufficient content for engaging thread*\n\n"
     
     output += """---
 
-## 💼 Medium Posts (LinkedIn, Mastodon)
+## 💼 Medium Posts (LinkedIn, Mastodon - With hashtags)
+
+*Note: Hashtags work well on LinkedIn and Mastodon for discoverability*
 
 """
     
@@ -390,7 +662,9 @@ Languages: {', '.join(summary.languages_used) or 'N/A'}
     
     output += """---
 
-## 📸 Long Form (Instagram, Blog)
+## 📸 Long Form (Instagram, Blog - With hashtags)
+
+*Note: Instagram posts can use up to 30 hashtags for maximum reach*
 
 """
     
@@ -421,7 +695,7 @@ Copy these: `{' '.join(posts['hashtags'])}`
     if summary.files_created:
         output += "\n### Files Created\n\n"
         for f in summary.files_created[:10]:
-            output += f"- `{f}`\n"
+            output += f"- `{safe_display_path(f)}`\n"
     
     if summary.git_commits:
         output += "\n### Commits\n\n"
@@ -436,33 +710,49 @@ def main():
         description='Generate social media posts from Claude Code sessions'
     )
     parser.add_argument('--session', '-s', help='Session ID or path to JSONL file')
+    parser.add_argument('session_spec', nargs='?', help='Session ID or path to JSONL file (positional)')
     parser.add_argument('--output', '-o', default='.', help='Output directory')
     parser.add_argument('--json', action='store_true', help='Also output raw JSON')
+    parser.add_argument('--project-name', help='Override project name (privacy-safe)')
+    parser.add_argument(
+        '--twitter-style',
+        default='devlog',
+        choices=['devlog', 'ship', 'minimal'],
+        help='Style preset for Twitter/X + BlueSky short/thread posts',
+    )
+    parser.add_argument(
+        '--linkedin-style',
+        default='professional',
+        choices=['professional', 'story', 'wins'],
+        help='Style preset for LinkedIn medium posts',
+    )
     
     args = parser.parse_args()
     
     # Find session file
-    if args.session:
-        if os.path.exists(args.session):
-            session_path = Path(args.session)
-            project_name = session_path.parent.name
+    session_spec = args.session or args.session_spec
+    if session_spec:
+        if os.path.exists(session_spec):
+            session_path = Path(session_spec)
+            project_dir_name = session_path.parent.name
         else:
             # Try to find by session ID
             projects_dir = find_claude_projects_dir()
             session_path = None
             for project in projects_dir.iterdir():
-                candidate = project / f"{args.session}.jsonl"
+                candidate = project / f"{session_spec}.jsonl"
                 if candidate.exists():
                     session_path = candidate
-                    project_name = project.name
+                    project_dir_name = project.name
                     break
             if not session_path:
-                print(f"Error: Session '{args.session}' not found", file=sys.stderr)
+                print(f"Error: Session '{session_spec}' not found", file=sys.stderr)
                 sys.exit(1)
     else:
-        session_path, project_name = get_latest_session()
+        session_path, project_dir_name = get_latest_session()
     
     session_id = session_path.stem
+    project_name = safe_project_name(project_dir_name, fallback=(args.project_name or Path.cwd().name))
     
     print(f"📖 Parsing session: {session_id}", file=sys.stderr)
     print(f"📁 Project: {project_name}", file=sys.stderr)
@@ -471,10 +761,14 @@ def main():
     messages = parse_session_jsonl(session_path)
     summary = extract_highlights(messages)
     summary.session_id = session_id
-    summary.project_name = project_name.replace("-", "/").lstrip("/")
+    summary.project_name = project_name
     
     # Generate posts
-    posts = generate_posts(summary)
+    posts = generate_posts(
+        summary,
+        twitter_style=args.twitter_style,
+        linkedin_style=args.linkedin_style,
+    )
     
     # Format output
     output = format_output(posts, summary)
@@ -499,12 +793,17 @@ def main():
                     'session_id': summary.session_id,
                     'project_name': summary.project_name,
                     'duration_minutes': summary.duration_minutes,
-                    'files_created': summary.files_created,
-                    'files_modified': summary.files_modified,
+                    'styles': {
+                        'twitter': args.twitter_style,
+                        'linkedin': args.linkedin_style,
+                    },
+                    # Keep filenames privacy-safe (no absolute paths).
+                    'files_created': [safe_display_path(p) for p in summary.files_created],
+                    'files_modified': [safe_display_path(p) for p in summary.files_modified],
                     'git_commits': summary.git_commits,
                     'errors_fixed': summary.errors_fixed,
                     'tests_run': summary.tests_run,
-                    'languages_used': list(summary.languages_used),
+                    'languages_used': sorted(list(summary.languages_used)),
                     'total_tool_calls': summary.total_tool_calls
                 },
                 'posts': posts
