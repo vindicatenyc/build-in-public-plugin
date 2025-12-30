@@ -17,25 +17,43 @@ This plugin automatically tracks your coding sessions and generates ready-to-pos
 
 ## Installation
 
-### From GitHub
+### From GitHub (Recommended)
 
-```bash
-# In Claude Code, run:
+**Step 1: Add the marketplace**
+```
 /plugin marketplace add https://github.com/vindicatenyc/build-in-public-plugin
+```
 
-# Then install:
+**Step 2: Install the plugin**
+```
 /plugin install build-in-public
 ```
 
-### Local Installation (for development)
+**Step 3: Restart Claude Code**
+
+After installation, restart Claude Code to load the plugin. You'll see a message: "✓ Installed build-in-public. Restart Claude Code to load new plugins."
+
+**Verify Installation:**
+```
+/plugin list
+```
+
+You should see `build-in-public (v1.0.0)` in the Installed tab.
+
+### Local Installation (For Plugin Development)
+
+If you're developing or testing changes to the plugin:
 
 ```bash
 # Clone the repo
 git clone https://github.com/vindicatenyc/build-in-public-plugin.git
+cd build-in-public-plugin
 
-# In Claude Code, add as local plugin:
-/plugin install --plugin-dir /path/to/build-in-public-plugin
+# Start Claude Code with the plugin loaded
+claude --plugin-dir .
 ```
+
+Note: The `--plugin-dir` flag is for development only and loads the plugin for that session. For permanent installation, use the GitHub method above.
 
 ## Usage
 
