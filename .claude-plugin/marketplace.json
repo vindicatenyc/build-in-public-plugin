@@ -1,13 +1,13 @@
 {
   "name": "build-in-public-marketplace",
   "owner": {
-    "name": "Your Name",
-    "email": "your.email@example.com"
+    "name": "Vindicate NYC",
+    "email": "vindicatenyc@gmail.com"
   },
   "plugins": [
     {
       "name": "build-in-public",
-      "source": ".",
+      "source": "./",
       "description": "Generate #BuildingInPublic social media posts from Claude Code sessions",
       "version": "1.0.0"
     }
