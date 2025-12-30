@@ -176,12 +176,23 @@ def extract_highlights(messages: List[Dict[str, Any]]) -> SessionSummary:
             if first_timestamp is None:
                 first_timestamp = ts
             last_timestamp = ts
-        
-        # Process tool uses
-        if msg.get('type') == 'tool_use' or 'tool_input' in msg:
+
+        # Extract tool uses from message content (Claude Code format)
+        tool_uses = []
+        if msg.get('type') == 'assistant' and 'message' in msg:
+            # Claude Code JSONL format: tool_use inside message.content[]
+            content = msg['message'].get('content', [])
+            if isinstance(content, list):
+                tool_uses = [item for item in content if isinstance(item, dict) and item.get('type') == 'tool_use']
+        elif msg.get('type') == 'tool_use':
+            # Direct tool_use format (fallback)
+            tool_uses = [msg]
+
+        # Process each tool use
+        for tool_use in tool_uses:
             total_tool_calls += 1
-            tool_name = msg.get('name', msg.get('tool_name', ''))
-            tool_input = msg.get('tool_input', msg.get('input', {}))
+            tool_name = tool_use.get('name', '')
+            tool_input = tool_use.get('input', {})
             
             # File operations
             if tool_name in ('Write', 'Edit', 'MultiEdit', 'create_file', 'str_replace'):
@@ -200,12 +211,20 @@ def extract_highlights(messages: List[Dict[str, Any]]) -> SessionSummary:
             # Bash commands
             elif tool_name == 'Bash':
                 command = tool_input.get('command', '')
-                
+
                 # Git commits
                 if 'git commit' in command:
-                    commit_match = re.search(r'-m ["\'](.+?)["\']', command)
-                    if commit_match:
-                        git_commits.append(commit_match.group(1))
+                    # Try heredoc format first: git commit -m "$(cat <<'EOF' ... EOF)"
+                    heredoc_match = re.search(r"<<'?EOF'?\s*\n(.+?)\n", command, re.DOTALL)
+                    if heredoc_match:
+                        # Extract first line of commit message from heredoc
+                        commit_msg = heredoc_match.group(1).strip().split('\n')[0]
+                        git_commits.append(commit_msg)
+                    else:
+                        # Fallback to simple -m "message" format
+                        commit_match = re.search(r'-m ["\'](.+?)["\']', command)
+                        if commit_match:
+                            git_commits.append(commit_match.group(1))
                 
                 # Test runs
                 if any(t in command for t in ['pytest', 'jest', 'npm test', 'cargo test', 'go test', 'rspec']):

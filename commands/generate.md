@@ -10,16 +10,16 @@ Generate social media posts from your Claude Code session for sharing on Twitter
 
 1. Run the post generation script located at `${CLAUDE_PLUGIN_ROOT}/scripts/generate_posts.py`
 
-2. If `$ARGUMENTS` contains a session ID or file path, pass it with `--session "$ARGUMENTS"`
+2. If `$ARGUMENTS` contains a session ID or file path, pass it as the final positional argument (or via `--session "$ARGUMENTS"`)
 
-3. Output the posts to the current working directory: `--output .`
+3. Create output directory if it doesn't exist and output posts there to keep the project clean
 
 4. Also generate JSON for automation: `--json`
 
 ## Command to Run
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/generate_posts.py" --output . --json $ARGUMENTS
+mkdir -p output && python3 "${CLAUDE_PLUGIN_ROOT}/scripts/generate_posts.py" --output output --json $ARGUMENTS
 ```
 
 ## After Running
@@ -37,7 +37,7 @@ After generating, tell the user something like:
 
 [paste the best short post here]
 
-Full options saved to: build-in-public_[timestamp].md
-JSON for automation: build-in-public_[timestamp].json
+Full options saved to: output/build-in-public_[timestamp].md
+JSON for automation: output/build-in-public_[timestamp].json
 
 The file includes Twitter threads, LinkedIn posts, and Instagram captions. Which platform would you like to post to first?"

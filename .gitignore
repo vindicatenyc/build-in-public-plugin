@@ -10,9 +10,13 @@ ENV/
 # Plugin runtime files
 .session_activity.json
 
-# Generated output (users may want to track these)
-# build-in-public_*.md
-# build-in-public_*.json
+# Firebase debug logs
+firebase-debug.log
+
+# Generated output
+build-in-public_*.md
+build-in-public_*.json
+output/
 
 # IDE
 .vscode/
