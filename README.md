@@ -183,6 +183,17 @@ linkedin_post = data['posts']['medium'][0]
 linkedin_client.post(linkedin_post)
 ```
 
+### Example: Publish Twitter/X posts with Hermes Tweet
+
+Hermes Agent users can route the generated JSON through [Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet#readme), a native Hermes Agent X/Twitter plugin. Keep it optional for sessions where posting should stay inside Hermes.
+
+```bash
+hermes plugins install Xquik-dev/hermes-tweet --enable
+export HERMES_TWEET_ENABLE_ACTIONS="true"
+```
+
+After setting `XQUIK_API_KEY` in the Hermes runtime, ask Hermes to use `tweet_explore` to confirm the post endpoint, then call `tweet_action` with a user-approved `data['posts']['short'][0]` value. Leave actions disabled for drafting-only sessions.
+
 ## Configuration
 
 ### Customize Hashtags
